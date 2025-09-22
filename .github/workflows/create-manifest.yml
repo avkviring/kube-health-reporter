@@ -1,0 +1,96 @@
+name: Create Multi-Arch Manifest
+
+on:
+  push:
+    tags:
+      - 'v*'
+      - '*.*.*'
+  workflow_run:
+    workflows: ["Build AMD64", "Build ARM64"]
+    types:
+      - completed
+  workflow_call:
+    inputs:
+      version:
+        description: 'Version to create manifest for'
+        required: true
+        type: string
+      image-name:
+        description: 'Docker image name'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/kube-health-reporter
+
+jobs:
+  create-manifest:
+    name: Create multi-arch manifest
+    runs-on: ubuntu-latest
+    # Только если оба build workflow успешно завершились
+    if: ${{ github.event_name == 'push' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.name == 'Build ARM64') }}
+    steps:
+      - name: Derive version and image name
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "push" ] && [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+            IMAGE_NAME="ghcr.io/${{ github.repository_owner }}/kube-health-reporter"
+            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+            echo "image-name=$IMAGE_NAME" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+            echo "image-name=${{ inputs.image-name }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Ждем некоторое время, чтобы артефакты были готовы
+      - name: Wait for artifacts
+        if: ${{ github.event_name == 'workflow_run' }}
+        run: sleep 30
+
+      - name: Download AMD64 digests
+        uses: actions/download-artifact@v4
+        with:
+          name: digests-amd64
+          path: /tmp/digests
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
+        continue-on-error: true
+
+      - name: Download ARM64 digests
+        uses: actions/download-artifact@v4
+        with:
+          name: digests-arm64
+          path: /tmp/digests
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
+        continue-on-error: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          if [ -f *.* ]; then
+            docker buildx imagetools create \
+              -t ${{ steps.ver.outputs.image-name }}:${{ steps.ver.outputs.version }} \
+              -t ${{ steps.ver.outputs.image-name }}:latest \
+              $(printf '${{ steps.ver.outputs.image-name }}@sha256:%s ' *)
+            echo "Multi-arch manifest created successfully"
+          else
+            echo "No digests found, skipping manifest creation"
+            echo "Available files:"
+            ls -la /tmp/digests/ || echo "Directory does not exist"
+          fi
