@@ -11,10 +11,6 @@ on:
         description: 'Version to deploy'
         required: true
         type: string
-      image-name:
-        description: 'Docker image name'
-        required: true
-        type: string
 
 permissions:
   contents: write
@@ -32,17 +28,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Derive version and image name
+      - name: Derive version
         id: ver
         run: |
           if [ "${{ github.event_name }}" = "push" ] && [[ "${{ github.ref }}" == refs/tags/* ]]; then
             VERSION="${GITHUB_REF_NAME#v}"
-            IMAGE_NAME="ghcr.io/${{ github.repository_owner }}/kube-health-reporter"
             echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-            echo "image-name=$IMAGE_NAME" >> "$GITHUB_OUTPUT"
           else
             echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
-            echo "image-name=${{ inputs.image-name }}" >> "$GITHUB_OUTPUT"
           fi
 
 

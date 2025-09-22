@@ -1,4 +1,4 @@
-name: Build AMD64
+name: Build Docker Image
 
 on:
   push:
@@ -16,10 +16,6 @@ on:
         required: false
         type: boolean
         default: false
-    outputs:
-      image-digest:
-        description: 'Docker image digest'
-        value: ${{ jobs.build-amd64.outputs.digest }}
 
 permissions:
   contents: read
@@ -29,11 +25,9 @@ env:
   IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/kube-health-reporter
 
 jobs:
-  build-amd64:
-    name: Build Docker image for AMD64
+  build:
+    name: Build Docker image
     runs-on: ubuntu-latest
-    outputs:
-      digest: ${{ steps.build.outputs.digest }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -61,7 +55,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push Docker image (amd64)
+      - name: Build and push Docker image
         id: build
         uses: docker/build-push-action@v6
         with:
@@ -69,24 +63,7 @@ jobs:
           platforms: linux/amd64
           push: ${{ steps.ver.outputs.push == 'true' }}
           tags: |
-            ${{ env.IMAGE_NAME }}:${{ steps.ver.outputs.version }}-amd64
-            ${{ env.IMAGE_NAME }}:latest-amd64
+            ${{ env.IMAGE_NAME }}:${{ steps.ver.outputs.version }}
+            ${{ env.IMAGE_NAME }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          outputs: type=image,name=${{ env.IMAGE_NAME }},push-by-digest=${{ steps.ver.outputs.push == 'true' }},name-canonical=true,push=${{ steps.ver.outputs.push == 'true' }}
-
-      - name: Export digest
-        if: ${{ steps.ver.outputs.push == 'true' }}
-        run: |
-          mkdir -p /tmp/digests
-          digest="${{ steps.build.outputs.digest }}"
-          touch "/tmp/digests/${digest#sha256:}"
-
-      - name: Upload digest
-        if: ${{ steps.ver.outputs.push == 'true' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: digests-amd64
-          path: /tmp/digests/*
-          if-no-files-found: error
-          retention-days: 1
