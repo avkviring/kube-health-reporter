@@ -1,0 +1,8 @@
+apiVersion: v2
+name: kube-health-reporter
+description: Kubernetes CronJob that reports pod health and metrics to Slack
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+
+

@@ -1,0 +1,63 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "kube-health-reporter.fullname" . }}
+  labels:
+    {{- include "kube-health-reporter.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.cron.schedule | quote }}
+  concurrencyPolicy: {{ .Values.cron.concurrencyPolicy }}
+  successfulJobsHistoryLimit: {{ .Values.cron.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.cron.failedJobsHistoryLimit }}
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            {{- include "kube-health-reporter.selectorLabels" . | nindent 12 }}
+        spec:
+          serviceAccountName: {{ include "kube-health-reporter.serviceAccountName" . }}
+          restartPolicy: Never
+          containers:
+            - name: reporter
+              image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              env:
+                - name: NAMESPACES
+                  value: {{ join "," .Values.namespaces | quote }}
+                - name: THRESHOLD_PERCENT
+                  value: {{ .Values.thresholdPercent | quote }}
+                - name: RESTART_GRACE_MINUTES
+                  value: {{ .Values.restartGraceMinutes | quote }}
+                - name: PENDING_GRACE_MINUTES
+                  value: {{ .Values.pendingGraceMinutes | quote }}
+                - name: FAIL_IF_NO_METRICS
+                  value: {{ ternary "true" "false" .Values.failIfNoMetrics | quote }}
+                {{- if .Values.clusterName }}
+                - name: CLUSTER_NAME
+                  value: {{ .Values.clusterName | quote }}
+                {{- end }}
+                {{- if .Values.datacenterName }}
+                - name: DATACENTER_NAME
+                  value: {{ .Values.datacenterName | quote }}
+                {{- end }}
+                - name: SLACK_WEBHOOK_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.slack.webhookSecretName }}
+                      key: {{ .Values.slack.webhookSecretKey }}
+              resources:
+                {{- toYaml .Values.resources | nindent 16 }}
+          {{- with .Values.nodeSelector }}
+          nodeSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.tolerations }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.affinity }}
+          affinity:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+

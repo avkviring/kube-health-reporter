@@ -1,0 +1,41 @@
+image:
+  repository: your-registry/kube-health-reporter
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+cron:
+  schedule: "*/20 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 2
+
+namespaces: [] # e.g., ["prod-a", "prod-b"]
+
+thresholdPercent: 85
+restartGraceMinutes: 5
+pendingGraceMinutes: 5
+failIfNoMetrics: true
+clusterName: ""
+datacenterName: ""
+
+serviceAccount:
+  create: true
+  name: ""
+
+rbac:
+  # Bind ClusterRole into each target namespace
+  create: true
+
+resources: {}
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+slack:
+  webhookSecretName: kube-health-reporter-slack
+  webhookSecretKey: webhook
+  createSecret: false
+  webhook: ""
+
+
