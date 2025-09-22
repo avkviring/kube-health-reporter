@@ -1,0 +1,61 @@
+name: Deploy Helm Chart
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: 'Version to deploy'
+        required: true
+        type: string
+      image-name:
+        description: 'Docker image name'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  CHART_DIR: helm/kube-health-reporter
+
+jobs:
+  deploy-helm:
+    name: Package and deploy Helm chart
+    runs-on: ubuntu-latest
+    needs: []
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.14.4
+
+      - name: Log in to GHCR (Helm OCI)
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io --username "${{ github.actor }}" --password-stdin
+
+      - name: Package Helm chart
+        run: |
+          mkdir -p dist
+          helm package "$CHART_DIR" \
+            --version "${{ inputs.version }}" \
+            --app-version "${{ inputs.version }}" \
+            --destination dist
+
+      - name: Push Helm chart to GHCR (OCI)
+        run: |
+          helm push "dist/kube-health-reporter-${{ inputs.version }}.tgz" \
+            oci://ghcr.io/${{ github.repository_owner }}
+
+      - name: Create GitHub Release and upload Helm chart asset
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ inputs.version }}
+          files: |
+            dist/kube-health-reporter-${{ inputs.version }}.tgz
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

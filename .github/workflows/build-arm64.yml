@@ -1,0 +1,75 @@
+name: Build ARM64
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: 'Version to build'
+        required: true
+        type: string
+      push:
+        description: 'Whether to push the image'
+        required: false
+        type: boolean
+        default: false
+    outputs:
+      image-digest:
+        description: 'Docker image digest'
+        value: ${{ jobs.build-arm64.outputs.digest }}
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/kube-health-reporter
+
+jobs:
+  build-arm64:
+    name: Build Docker image for ARM64
+    runs-on: ubuntu-24.04-arm64
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: ${{ inputs.push }}
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image (arm64)
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/arm64
+          push: ${{ inputs.push }}
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ inputs.version }}-arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          outputs: type=image,name=${{ env.IMAGE_NAME }},push-by-digest=${{ inputs.push }},name-canonical=true,push=${{ inputs.push }}
+
+      - name: Export digest
+        if: ${{ inputs.push }}
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        if: ${{ inputs.push }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-arm64
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1

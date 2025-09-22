@@ -12,74 +12,75 @@ permissions:
 
 env:
   IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/kube-health-reporter
-  CHART_DIR: helm/kube-health-reporter
 
 jobs:
-  release:
-    name: Build and publish Docker image and Helm chart
+  prepare:
+    name: Prepare release
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
       - name: Derive version from tag
         id: ver
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+  build-amd64:
+    name: Build AMD64
+    needs: prepare
+    uses: ./.github/workflows/build-amd64.yml
+    with:
+      version: ${{ needs.prepare.outputs.version }}
+      push: true
+    secrets: inherit
+
+  build-arm64:
+    name: Build ARM64
+    needs: prepare
+    uses: ./.github/workflows/build-arm64.yml
+    with:
+      version: ${{ needs.prepare.outputs.version }}
+      push: true
+    secrets: inherit
+
+  merge-manifests:
+    name: Create multi-arch manifest
+    runs-on: ubuntu-latest
+    needs: [prepare, build-amd64, build-arm64]
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-*
+          merge-multiple: true
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to GHCR (Docker)
+      - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push Docker image (amd64 + arm64)
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: |
-            ${{ env.IMAGE_NAME }}:${{ steps.ver.outputs.version }}
-            ${{ env.IMAGE_NAME }}:latest
-
-      - name: Set up Helm
-        uses: azure/setup-helm@v4
-        with:
-          version: v3.14.4
-
-      - name: Log in to GHCR (Helm OCI)
-        run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io --username "${{ github.actor }}" --password-stdin
-
-      - name: Package Helm chart
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
         run: |
-          mkdir -p dist
-          helm package "$CHART_DIR" \
-            --version "${{ steps.ver.outputs.version }}" \
-            --app-version "${{ steps.ver.outputs.version }}" \
-            --destination dist
+          docker buildx imagetools create \
+            -t ${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.version }} \
+            -t ${{ env.IMAGE_NAME }}:latest \
+            $(printf '${{ env.IMAGE_NAME }}@sha256:%s ' *)
 
-      - name: Push Helm chart to GHCR (OCI)
-        run: |
-          helm push "dist/kube-health-reporter-${{ steps.ver.outputs.version }}.tgz" \
-            oci://ghcr.io/${{ github.repository_owner }}
-
-      - name: Create GitHub Release and upload Helm chart asset
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            dist/kube-health-reporter-${{ steps.ver.outputs.version }}.tgz
-          generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  deploy-helm:
+    name: Deploy Helm Chart
+    needs: [prepare, merge-manifests]
+    uses: ./.github/workflows/deploy-helm.yml
+    with:
+      version: ${{ needs.prepare.outputs.version }}
+      image-name: ${{ env.IMAGE_NAME }}
+    secrets: inherit
 
 
